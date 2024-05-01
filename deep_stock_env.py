@@ -99,23 +99,37 @@ if __name__ == '__main__':
    # be incorporated into abovee code later
    
   df = pd.read_csv("./small_aapl_data.csv")
+  BBID_COL = df.columns.get_loc("BP1")
+  BASK_COL = df.columns.get_loc("AP1")
   
   ## Computing our state features
   df['Position'] = 0
   df['Cash'] = args.cash
+  df['Stock Price'] = (df.iloc[:,BASK_COL] + df.iloc[:,BBID_COL]) / 2
   
   # Momentum-5
-  df["Cumulative Returns"] = (df.loc[:, 'Price'] / df.iloc[0, 3]) - 1
+  df["Cumulative Returns"] = (df.loc[:, 'Stock Price'] / df.iloc[0, 3]) - 1
   df['MOM'] = df.loc[:, "Cumulative Returns"].diff(periods=5)
-  df.drop(columns=['Cumulative Returns'])
+  df = df.drop(columns=['Stock Price'])
   df = df.fillna(0)
   
+  # Imbalance
+  bid_vol_cols = [x for x in range( (BBID_COL+1), (BBID_COL+40), 4 )]
+  ask_vol_cols = [x for x in range( (BASK_COL+1), (BASK_COL+40), 4 )]
+  df['Bid Volume'] = df.iloc[:, [bid_vol_cols]].sum(axis=1)
+  df['Ask Volume'] = df.iloc[:, [ask_vol_cols]].sum(axis=1)
+  df['Imbalance'] = df['Bid Volume'] - df['Ask Volume']
+  df = df.drop(columns=['Bid Volume', 'Ask Volume'])
+  
+  # Spread
+  df['Spread'] = df.iloc[:, BBID_COL] - df.iloc[:, BASK_COL]
+
+  ## Temporary code for running on small dataset
   df_list.append(df)
   day_list.append('2024-03-08')
   sym_list.append('AAPL')
   days = 1
-  BBID_COL = df.columns.get_loc("BP1")
-  BASK_COL = df.columns.get_loc("AP1")
+
   
 
   ### Benchmark computation.
