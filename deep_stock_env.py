@@ -55,44 +55,68 @@ if __name__ == '__main__':
 
   ### HFT data file reading.
 
-  # Read the data only once.  It's big!
-  csv_files = glob.glob(os.path.join(".", "data", "hft_data", "*", "*_message_*.csv"))
-  date_str = re.compile(r'_(\d{4}-\d{2}-\d{2})_')
-  stock_str = re.compile(r'([A-Z]+)_\d{4}-\d{2}-\d{2}_')
+  # # Read the data only once.  It's big!
+  # csv_files = glob.glob(os.path.join("..", "data", "hft_data", "*", "*_message_*.csv"))
+  # date_str = re.compile(r'_(\d{4}-\d{2}-\d{2})_')
+  # stock_str = re.compile(r'([A-Z]+)_\d{4}-\d{2}-\d{2}_')
 
   df_list = []
   day_list = []
   sym_list = []
 
-  for csv_file in sorted(csv_files):
-    date = date_str.search(csv_file)
-    date = date.group(1)
-    day_list.append(date)
+  # for csv_file in sorted(csv_files):
+  #   date = date_str.search(csv_file)
+  #   date = date.group(1)
+  #   day_list.append(date)
 
-    symbol = stock_str.search(csv_file)
-    symbol = symbol.group(1)
-    sym_list.append(symbol)
+  #   symbol = stock_str.search(csv_file)
+  #   symbol = symbol.group(1)
+  #   sym_list.append(symbol)
 
-    # Find the order book file that matches this message file.
-    book_file = csv_file.replace("message", "orderbook")
+  #   # Find the order book file that matches this message file.
+  #   book_file = csv_file.replace("message", "orderbook")
 
-    # Read the message file and index by timestamp.
-    df = pd.read_csv(csv_file, names=['Time','EventType','OrderID','Size','Price','Direction'])
-    df['Time'] = pd.to_datetime(date) + pd.to_timedelta(df['Time'], unit='s')
+  #   # Read the message file and index by timestamp.
+  #   df = pd.read_csv(csv_file, names=['Time','EventType','OrderID','Size','Price','Direction'])
+  #   df['Time'] = pd.to_datetime(date) + pd.to_timedelta(df['Time'], unit='s')
 
-    # Read the order book file and merge it with the messages.
-    names = [f"{x}{i}" for i in range(1,11) for x in ["AP","AS","BP","BS"]]
-    df = df.join(pd.read_csv(book_file, names=names), how='inner')
-    df = df.set_index(['Time'])
+  #   # Read the order book file and merge it with the messages.
+  #   names = [f"{x}{i}" for i in range(1,11) for x in ["AP","AS","BP","BS"]]
+  #   df = df.join(pd.read_csv(book_file, names=names), how='inner')
+  #   df = df.set_index(['Time'])
 
-    BBID_COL = df.columns.get_loc("BP1")
-    BASK_COL = df.columns.get_loc("AP1")
+  #   BBID_COL = df.columns.get_loc("BP1")
+  #   BASK_COL = df.columns.get_loc("AP1")
 
-    print (f"Read {df.shape[0]} unique order book shapshots from {csv_file}")
+  #   print (f"Read {df.shape[0]} unique order book shapshots from {csv_file}")
 
-    df_list.append(df)
+  #   df_list.append(df)
 
-  days = len(day_list)
+  # days = len(day_list)
+  
+  
+  ## This is bas code for setting up on a much smaller data set, will
+   # be incorporated into abovee code later
+   
+  df = pd.read_csv("./small_aapl_data.csv")
+  
+  ## Computing our state features
+  df['Position'] = 0
+  df['Cash'] = args.cash
+  
+  # Momentum-5
+  df["Cumulative Returns"] = (df.loc[:, 'Price'] / df.iloc[0, 3]) - 1
+  df['MOM'] = df.loc[:, "Cumulative Returns"].diff(periods=5)
+  df.drop(columns=['Cumulative Returns'])
+  df = df.fillna(0)
+  
+  df_list.append(df)
+  day_list.append('2024-03-08')
+  sym_list.append('AAPL')
+  days = 1
+  BBID_COL = df.columns.get_loc("BP1")
+  BASK_COL = df.columns.get_loc("AP1")
+  
 
   ### Benchmark computation.
 
@@ -123,8 +147,8 @@ if __name__ == '__main__':
 
       if (len(is_brets) <= day):
         # Compute benchmark cumulative returns once per day only.
-        # TO DO: define some "cutoff row" where the training
-        # stops for the day and the testing starts
+        
+        cutoff_row = int(len(data)*0.8)
 
         is_start_mid = (data.iloc[0,BASK_COL] + data.iloc[0,BBID_COL]) / 2
         oos_start_mid = (data.iloc[cutoff_row,BASK_COL] + data.iloc[cutoff_row,BBID_COL]) / 2
