@@ -11,6 +11,7 @@ import glob, os, re
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import backtest_deep_q
 
 
 class StockEnvironment:
@@ -26,6 +27,82 @@ class StockEnvironment:
 
   Ultimately, what you do is up to you!
   """
+  
+  def __init__ (self, fixed = None, floating = None, position_limit = 1000):
+      
+      self.fixed_cost = fixed
+      self.floating_cost = floating
+      self.position_lim = position_limit
+      return
+      
+  
+  def get_state_features (self, day_data, feature_idxs):
+      
+      return day_data.iloc[[feature_idxs]]
+  
+  def update_holdings (self, df, day_idx, new_position, position_idx, stock_price_idx, cash_idx, impact_costs = True):
+      
+      cost = (new_position - df.iloc[day_idx,position_idx]) * df.iloc[day_idx,stock_price_idx]
+      df.iloc[day_idx, cash_idx] -= cost
+      if impact_costs:
+          df.iloc[day_idx, cash_idx] -= (self.fixed_cost + self.floating_cost * cost)
+      df.iloc[day_idx,position_idx] = new_position
+      
+      return
+      
+  
+  def train_learner (self, Q, df, features = ['AP1', 'BP1', 'Spread', 'Imbalance'], print_loss=True):
+      
+      stock_price_idx = df.columns.get_loc('Stock Price')
+      position_idx = df.columns.get_loc('Position')
+      cash_idx = df.columns.get_loc('Cash')
+      feature_idxs = []
+      for feat in features:
+          feature_idxs.append(df.columns.get_loc(feat))
+      
+      start = self.get_state_features(df.iloc[0, :], feature_idxs)
+      s = start
+      a = Q.query(s)
+      trip_loss = 0
+      
+      # Train on all the training data for this trip
+      for i in range(len(df)):
+          
+          r = df.iloc[i, stock_price_idx] * df.iloc[i, position_idx] + df.iloc[i, cash_idx]
+          self.update_holdings(df, i, a*self.position_lim)
+          r = ((df.iloc[i+1, stock_price_idx] * df.iloc[i, position_idx] + df.iloc[i, cash_idx]) / r) - 1
+          s = self.get_state_features(df.iloc[i,:], feature_idxs)
+          a = Q.query(s)
+          trip_loss += loss
+      
+      
+      return trip_loss
+  
+  def test_learner (self, Q, df, features = ['AP1', 'BP1', 'Spread', 'Imbalance']):
+      
+      df_trades = pd.DataFrame(np.nan, index=df.index, columns=['Trade'])
+      stock_price_idx = df.columns.get_loc('Stock Price')
+      position_idx = df.columns.get_loc('Position')
+      cash_idx = df.columns.get_loc('Cash')
+      feature_idxs = []
+      for feat in features:
+          feature_idxs.append(df.columns.get_loc(feat))
+      
+      start = self.get_state_features(df.iloc[0, :], feature_idxs)
+      s = start
+      a = Q.query(s)
+      
+      # Train on all the training data for this trip
+      for i in range(len(df)):
+          
+          prev_holding = df.iloc[i, position_idx]
+          self.update_holdings(df, i, a*self.position_lim)
+          df_trades.iloc[i, 0] = df.iloc[i, position_idx] - prev_holding
+          s = self.get_state_features(df.iloc[i,:], feature_idxs)
+          a = Q.query(s)
+      
+      return df_trades
+
 
 
 if __name__ == '__main__':
@@ -97,8 +174,11 @@ if __name__ == '__main__':
   
   ## This is bas code for setting up on a much smaller data set, will
    # be incorporated into abovee code later
-   
+
   df = pd.read_csv("./small_aapl_data.csv")
+  df = df.set_index(['Time'])
+  names = [f"{x}{i}" for i in range(1,11) for x in ["AP","AS","BP","BS"]]
+  df[names] /= 10000   # LOBSTER price data is multiplied by 10000, normalize it
   BBID_COL = df.columns.get_loc("BP1")
   BASK_COL = df.columns.get_loc("AP1")
   
@@ -108,16 +188,21 @@ if __name__ == '__main__':
   df['Stock Price'] = (df.iloc[:,BASK_COL] + df.iloc[:,BBID_COL]) / 2
   
   # Momentum-5
-  df["Cumulative Returns"] = (df.loc[:, 'Stock Price'] / df.iloc[0, 3]) - 1
-  df['MOM'] = df.loc[:, "Cumulative Returns"].diff(periods=5)
-  df = df.drop(columns=['Stock Price'])
+  
+  df['Price Change'] = df['Stock Price'].pct_change()
+  df['Cumulative Returns'] = (1 + df['Price Change']).rolling(window=6).apply(np.prod, raw=True) - 1
+  df['Momentum-5'] = df['Cumulative Returns'].shift(-5)
+  
+  # df["Cumulative Returns"] = (df.loc[:, 'Stock Price'] / df.iloc[0, df.columns.get_loc('Stock Price')]) - 1
+  # df['MOM'] = df.loc[:, "Cumulative Returns"].diff(periods=5)
+  # df = df.drop(columns=['Stock Price'])
   df = df.fillna(0)
   
   # Imbalance
-  bid_vol_cols = [x for x in range( (BBID_COL+1), (BBID_COL+40), 4 )]
-  ask_vol_cols = [x for x in range( (BASK_COL+1), (BASK_COL+40), 4 )]
-  df['Bid Volume'] = df.iloc[:, [bid_vol_cols]].sum(axis=1)
-  df['Ask Volume'] = df.iloc[:, [ask_vol_cols]].sum(axis=1)
+  bid_vol_cols = [x for x in range( (BBID_COL+1), (BBID_COL+(4*10)), 4 )]
+  ask_vol_cols = [x for x in range( (BASK_COL+1), (BASK_COL+(4*10)), 4 )]
+  df['Bid Volume'] = df.iloc[:, bid_vol_cols].sum(axis=1)
+  df['Ask Volume'] = df.iloc[:, ask_vol_cols].sum(axis=1)
   df['Imbalance'] = df['Bid Volume'] - df['Ask Volume']
   df = df.drop(columns=['Bid Volume', 'Ask Volume'])
   
@@ -129,7 +214,7 @@ if __name__ == '__main__':
   day_list.append('2024-03-08')
   sym_list.append('AAPL')
   days = 1
-
+  df.to_csv('small_aapl_df.csv')
   
 
   ### Benchmark computation.
@@ -150,20 +235,22 @@ if __name__ == '__main__':
   for trial in range(args.trials):
 
     # Create an instance of the environment class.
-    env = StockEnvironment( )   # TO DO: parameters.
+    env = StockEnvironment( fixed = args.fixed, floating = args.floating, position_limit = args.shares )
 
     # TO DO: approach - train and test on a part of each day?
     for day in range(days):
       data = df_list[day]
       symbol = sym_list[day]
+      cutoff_row = int(len(data)*0.8)
+      training_data = data.iloc[:cutoff_row,:]
+      testing_data = data.iloc[cutoff_row:,:]
+      losses = []
 
       # TO DO: Make a learner around here?
 
       if (len(is_brets) <= day):
         # Compute benchmark cumulative returns once per day only.
         
-        cutoff_row = int(len(data)*0.8)
-
         is_start_mid = (data.iloc[0,BASK_COL] + data.iloc[0,BBID_COL]) / 2
         oos_start_mid = (data.iloc[cutoff_row,BASK_COL] + data.iloc[cutoff_row,BBID_COL]) / 2
         oos_end_mid = (data.iloc[-1,BASK_COL] + data.iloc[-1,BBID_COL]) / 2
@@ -179,6 +266,9 @@ if __name__ == '__main__':
         print (f"Training {symbol}, {day_list[day]}: Trip {trip}")
 
         # TO DO: call  env.train_learner around here to train on one day for one trip?
+        
+        trip_loss = env.train_learner(learner, training_data)
+        losses.append(trip_loss)
 
         # Draw updating plot of the loss per "trip" to ensure  learner
         # was moving in the right direction.  This required exposing/returning some
@@ -199,6 +289,8 @@ if __name__ == '__main__':
 
       # In sample.
       print (f"In-sample {symbol}: {day_list[day]}")
+      trades_df = env.test_learner(learner, testing_data)
+      trades_eval = backtest_tech_ind.test_assess_strategy(starting_value=200000, trades=trades_df)
       is_cr[day].append( )   # Call env.test_learner on the in-sample data.
 
       # Out of sample.
