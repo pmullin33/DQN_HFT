@@ -49,10 +49,10 @@ class ReplayMemory:
         if self.position == self.capacity:
             self.position = 0
             self.filled = True
-        self.state_memory[self.i] = experience[0]
-        self.new_state_memory[self.i] = experience[2]
-        self.action_memory[self.i] = experience[1]
-        self.reward_memory[self.i] = experience[3]
+        self.state_memory[self.position] = experience[0]
+        self.new_state_memory[self.position] = experience[2]
+        self.action_memory[self.position] = experience[1]
+        self.reward_memory[self.position] = experience[3]
         return
         
     def sample(self, batch_size):
@@ -63,7 +63,7 @@ class ReplayMemory:
         actions = self.action_memory[batch]
         rewards = self.reward_memory[batch]
         new_states = self.new_state_memory[batch]
-        return states, actions, rewards, new_states
+        return states, actions, new_states, rewards
     
 
 
@@ -77,14 +77,15 @@ class DeepQLearner:
         # Make networks, store parameters, initialize things.
 
         self.device = torch.device("cpu")
-        self.prev_state
-        self.prev_action
+        self.prev_state = None
+        self.prev_action = None
         self.actions = actions
         self.gamma = gamma
         self.epsilon = epsilon
         self.epsilon_decay = epsilon_decay
         self.tau = tau
         self.batch_size = batch_size
+        self.real_experiences = 0
         self.memory = ReplayMemory(mem_capacity, features)
         self.Qnet = DeepQNetwork(features=features, actions=actions)
         self.Tnet = DeepQNetwork(features=features, actions=actions)
@@ -100,6 +101,12 @@ class DeepQLearner:
 
 
     # Probably will have several helper methods
+    
+    
+    def update_target_network(self):
+        for target_param, q_param in zip(self.Tnet.parameters(), self.Qnet.parameters()):
+            target_param.data.copy(self.tau * q_param.data + (1.0 - self.tau) * target_param.data)
+        return
     
     def select_action(self, s, allow_random = True):
         
@@ -117,26 +124,22 @@ class DeepQLearner:
         if not self.memory.filled:
             return
         
-        states, actions, rewards, next_states, dones = self.memory.sample(self.batch_size)
+        states, actions, rewards, next_states = self.memory.sample(self.batch_size)
 
         states = torch.tensor(states).to(self.device)
         next_states = torch.tensor(next_states).to(self.device)
         actions = torch.tensor(actions).to(self.device)
         rewards = torch.tensor(rewards).to(self.device)
-        dones = torch.tensor(dones).to(self.device)
 
-        current_q_values = self.Qnet(states).gather(1, actions.unsqueeze(-1)).squeeze(-1)
-        next_q_values = self.Tnet(next_states).max(1)[0]
-        next_q_values[dones] = 0.0
-        expected_q_values = rewards + self.gamma * next_q_values
-
-        loss = self.loss_fn(current_q_values, expected_q_values)
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
-
-        self._update_target_network()
+        y_pred = self.Qnet(states).gather(1, actions.unsqueeze(-1)).squeeze(-1)
         
+        y = self.Tnet(next_states).max(1)[0]
+        y_expected = rewards + self.gamma * y
+
+        loss = torch.nn.MSELoss()
+        graph = loss(y_pred, y_expected)
+        graph.backward()
+        self.optimizer.step()        
 
 
     def train(self, s, r):    # Add params
@@ -145,19 +148,43 @@ class DeepQLearner:
         # Remember what we've done in an experience buffer.
         # Occasionally sample and train on a bunch of stuff from the buffer.
         
-        a = self.select_action(s)
-        loss = torch.nn.MSELoss()
+        # Select an action
+        self.real_experiences += 1
+        y_pred = self.select_action(self.prev_state)
+        y = torch.argmax(self.Tnet(s)).numpy()
+        y_expected = r + self.gamma * y
         
+        # Remember the experience
+        experience = [self.prev_state, self.prev_action, s, r]
+        self.memory.add(experience)
+        if self.real_experiences > 1000:
+            self.real_experiences = 0
+            self.replay()
+            
+        # Calculate loss from "correct y value" gotten from target network
+        loss = torch.nn.MSELoss()
+        graph = loss(y_pred, y)
+        graph.backward()
+        self.optimizer.step()
+        
+        # Update T net and set out prev state and action
+        self.update_target_network()
+        self.prev_state = s
+        self.prev_action = y_pred
 
         # Eventually...
-        return a
+        return y_pred
 
 
     def test(self, s, allow_random = False):   # Plus whatever else you need.
 
         # Select a real action, maybe at random (sometimes).
         # No experience buffer here.  No updating the networks.
-
-        # Eventually...
+        
+        a = self.select_action(s, allow_random=allow_random)
+        self.optimizer.zero_grad()
+        self.prev_state = s
+        self.prev_action = a
         return a
+
 
