@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import backtest_deep_q
+from DeepQLearner import DeepQLearner as Learner
 
 
 class StockEnvironment:
@@ -62,17 +63,18 @@ class StockEnvironment:
       
       start = self.get_state_features(df.iloc[0, :], feature_idxs)
       s = start
-      a = Q.query(s)
+      a = Q.test(s, allow_random=True)
       trip_loss = 0
       
       # Train on all the training data for this trip
       for i in range(len(df)):
           
           r = df.iloc[i, stock_price_idx] * df.iloc[i, position_idx] + df.iloc[i, cash_idx]
-          self.update_holdings(df, i, a*self.position_lim)
+          self.update_holdings(df, i, (a-1)*self.position_lim)
           r = ((df.iloc[i+1, stock_price_idx] * df.iloc[i, position_idx] + df.iloc[i, cash_idx]) / r) - 1
           s = self.get_state_features(df.iloc[i,:], feature_idxs)
-          a = Q.query(s)
+          a = Q.train(s, r)
+          loss = Q.loss
           trip_loss += loss
       
       
@@ -90,7 +92,7 @@ class StockEnvironment:
       
       start = self.get_state_features(df.iloc[0, :], feature_idxs)
       s = start
-      a = Q.query(s)
+      a = Q.test(s)
       
       # Train on all the training data for this trip
       for i in range(len(df)):
@@ -99,7 +101,7 @@ class StockEnvironment:
           self.update_holdings(df, i, a*self.position_lim)
           df_trades.iloc[i, 0] = df.iloc[i, position_idx] - prev_holding
           s = self.get_state_features(df.iloc[i,:], feature_idxs)
-          a = Q.query(s)
+          a = Q.test(s)
       
       return df_trades
 
@@ -208,6 +210,8 @@ if __name__ == '__main__':
   
   # Spread
   df['Spread'] = df.iloc[:, BBID_COL] - df.iloc[:, BASK_COL]
+  
+  features = ['AP1', 'BP1', 'Spread', 'Imbalance']
 
   ## Temporary code for running on small dataset
   df_list.append(df)
@@ -247,6 +251,7 @@ if __name__ == '__main__':
       losses = []
 
       # TO DO: Make a learner around here?
+      learner = Learner(features=len(features), actions=3)
 
       if (len(is_brets) <= day):
         # Compute benchmark cumulative returns once per day only.
@@ -290,7 +295,7 @@ if __name__ == '__main__':
       # In sample.
       print (f"In-sample {symbol}: {day_list[day]}")
       trades_df = env.test_learner(learner, testing_data)
-      trades_eval = backtest_tech_ind.test_assess_strategy(starting_value=200000, trades=trades_df)
+      trades_eval = backtest_deep_q.test_assess_strategy(starting_value=200000, trades=trades_df)
       is_cr[day].append( )   # Call env.test_learner on the in-sample data.
 
       # Out of sample.

@@ -79,6 +79,7 @@ class DeepQLearner:
         self.device = torch.device("cpu")
         self.prev_state = None
         self.prev_action = None
+        self.loss = None
         self.actions = actions
         self.gamma = gamma
         self.epsilon = epsilon
@@ -131,15 +132,16 @@ class DeepQLearner:
         actions = torch.tensor(actions).to(self.device)
         rewards = torch.tensor(rewards).to(self.device)
 
-        y_pred = self.Qnet(states).gather(1, actions.unsqueeze(-1)).squeeze(-1)
-        
-        y = self.Tnet(next_states).max(1)[0]
+        y_pred = self.Qnet(states)
+        y = self.Tnet(next_states)
         y_expected = rewards + self.gamma * y
 
         loss = torch.nn.MSELoss()
         graph = loss(y_pred, y_expected)
         graph.backward()
-        self.optimizer.step()        
+        self.optimizer.step() 
+        
+        return
 
 
     def train(self, s, r):    # Add params
@@ -163,7 +165,8 @@ class DeepQLearner:
             
         # Calculate loss from "correct y value" gotten from target network
         loss = torch.nn.MSELoss()
-        graph = loss(y_pred, y)
+        graph = loss(y_pred, y_expected)
+        self.loss = graph
         graph.backward()
         self.optimizer.step()
         
