@@ -155,7 +155,7 @@ def test_assess_strategy(trade_file="./trades/trades.csv", starting_value=100000
     end_value = portfolio.iloc[-1, 0]
     # spx_portfolio_end_value = spx_portfolio.iloc[-1, 0]
 
-    portfolio["Daily Returns"] = ((portfolio.iloc[:,0] / portfolio.iloc[:,0].shift()) - 1)
+    portfolio["Period Returns"] = ((portfolio.iloc[:,0] / portfolio.iloc[:,0].shift()) - 1)
     # spx_portfolio["Daily Returns"] = ((spx_portfolio.iloc[:,0] / spx_portfolio.iloc[:,0].shift()) - 1)
     
     average_daily_return = portfolio.iloc[:,-1].mean()
