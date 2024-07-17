@@ -15,4 +15,4 @@ Data is from lobsterdata.com - provided by Prof. Byrd
 - Use some form of weighted average big and weighted average ask as feature?
 
 - Basic Fully Connected FFN will pobably be sufficient to beat benchmark
-- 7ish input - 10 - 8 - 4 - 6 - 3 outputs (buy 100, nothing, sell 100)?
+- 7ish input - 10 - 8 - 4 - 6 - 3 outputs (go long, go flat, go short)?
